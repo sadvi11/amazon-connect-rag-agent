@@ -1,0 +1,173 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "set-logging",
+  "Metadata": {
+    "entryPointPosition": {
+      "x": 20,
+      "y": 20
+    },
+    "name": "RagChatFlow",
+    "description": "Chat contact flow. Lex answers from the knowledge base; anything ungrounded is handed to an agent with context."
+  },
+  "Actions": [
+    {
+      "Identifier": "set-logging",
+      "Type": "UpdateFlowLoggingBehavior",
+      "Parameters": {
+        "FlowLoggingBehavior": "Enabled"
+      },
+      "Transitions": {
+        "NextAction": "stamp-contact-id"
+      }
+    },
+    {
+      "Identifier": "stamp-contact-id",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "contactId": "$.ContactId",
+          "escalate": "false"
+        }
+      },
+      "Transitions": {
+        "NextAction": "greet",
+        "Errors": [
+          {
+            "NextAction": "to-agent",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "greet",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Hi. Ask me a question and I'll answer from our help centre. If I don't know, I'll pass you to someone who does."
+      },
+      "Transitions": {
+        "NextAction": "ask-bot",
+        "Errors": [
+          {
+            "NextAction": "to-agent",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "ask-bot",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "LexV2Bot": {
+          "AliasArn": "$.Parameters.LexBotAliasArn"
+        }
+      },
+      "Transitions": {
+        "NextAction": "check-escalate",
+        "Errors": [
+          {
+            "NextAction": "to-agent",
+            "ErrorType": "NoMatchingCondition"
+          },
+          {
+            "NextAction": "to-agent",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "check-escalate",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.Attributes.escalate"
+      },
+      "Transitions": {
+        "NextAction": "ask-bot",
+        "Conditions": [
+          {
+            "NextAction": "to-agent",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "true"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "to-agent",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "to-agent",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Connecting you to an agent now. They can see what we've discussed, so you won't need to repeat yourself."
+      },
+      "Transitions": {
+        "NextAction": "set-queue",
+        "Errors": [
+          {
+            "NextAction": "set-queue",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "set-queue",
+      "Type": "UpdateContactTargetQueue",
+      "Parameters": {
+        "QueueId": "$.Parameters.SupportQueueArn"
+      },
+      "Transitions": {
+        "NextAction": "transfer",
+        "Errors": [
+          {
+            "NextAction": "apologise",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "transfer",
+      "Type": "TransferContactToQueue",
+      "Parameters": {},
+      "Transitions": {
+        "NextAction": "apologise",
+        "Errors": [
+          {
+            "NextAction": "apologise",
+            "ErrorType": "QueueAtCapacity"
+          },
+          {
+            "NextAction": "apologise",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "apologise",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Nobody is available right now. Please try again shortly, and sorry about that."
+      },
+      "Transitions": {
+        "NextAction": "end"
+      }
+    },
+    {
+      "Identifier": "end",
+      "Type": "DisconnectParticipant",
+      "Parameters": {}
+    }
+  ]
+}

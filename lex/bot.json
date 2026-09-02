@@ -1,0 +1,119 @@
+{
+  "botName": "SupportKnowledgeBot",
+  "description": "Intent and slot capture in front of a grounded RAG service.",
+  "dataPrivacy": {
+    "childDirected": false
+  },
+  "idleSessionTTLInSeconds": 300,
+  "localeId": "en_CA",
+  "nluIntentConfidenceThreshold": 0.55,
+  "intents": [
+    {
+      "intentName": "AskQuestion",
+      "description": "Anything answerable from the knowledge base.",
+      "sampleUtterances": [
+        {
+          "utterance": "what is your refund policy"
+        },
+        {
+          "utterance": "how long do refunds take"
+        },
+        {
+          "utterance": "how do I return an item"
+        },
+        {
+          "utterance": "when will my order arrive"
+        },
+        {
+          "utterance": "can I change my delivery address"
+        },
+        {
+          "utterance": "I have a question about {Topic}"
+        }
+      ],
+      "slots": [
+        {
+          "slotName": "Topic",
+          "slotTypeName": "AMAZON.FreeFormInput",
+          "valueElicitationSetting": {
+            "slotConstraint": "Optional"
+          }
+        }
+      ],
+      "fulfillmentCodeHook": {
+        "enabled": true
+      }
+    },
+    {
+      "intentName": "CheckOrder",
+      "description": "Order status. Captures the order number before the hook runs, so the Lambda is not asked to parse it out of prose.",
+      "sampleUtterances": [
+        {
+          "utterance": "where is my order"
+        },
+        {
+          "utterance": "track order {OrderNumber}"
+        },
+        {
+          "utterance": "status of {OrderNumber}"
+        }
+      ],
+      "slots": [
+        {
+          "slotName": "OrderNumber",
+          "slotTypeName": "AMAZON.AlphaNumeric",
+          "valueElicitationSetting": {
+            "slotConstraint": "Required",
+            "promptSpecification": {
+              "maxRetries": 2,
+              "messageGroups": [
+                {
+                  "message": {
+                    "plainTextMessage": {
+                      "value": "What's your order number?"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "fulfillmentCodeHook": {
+        "enabled": true
+      }
+    },
+    {
+      "intentName": "TalkToAgent",
+      "description": "Explicit request for a human. Always honoured immediately - a bot that argues about this is the single fastest way to lose a customer.",
+      "sampleUtterances": [
+        {
+          "utterance": "talk to a human"
+        },
+        {
+          "utterance": "speak to an agent"
+        },
+        {
+          "utterance": "representative"
+        },
+        {
+          "utterance": "this isn't helping"
+        },
+        {
+          "utterance": "agent"
+        }
+      ],
+      "fulfillmentCodeHook": {
+        "enabled": true
+      }
+    },
+    {
+      "intentName": "FallbackIntent",
+      "description": "Below the confidence threshold. Routed to the same hook, which will abstain and escalate rather than guess.",
+      "parentIntentSignature": "AMAZON.FallbackIntent",
+      "fulfillmentCodeHook": {
+        "enabled": true
+      }
+    }
+  ]
+}
