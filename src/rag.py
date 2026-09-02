@@ -11,6 +11,8 @@ by a determined customer; a function that returns early cannot.
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
 import re
 from dataclasses import dataclass, field
 
@@ -64,6 +66,45 @@ def retrieve(query: str, store, k: int = 4) -> list[Passage]:
     keyword = store.keyword_search(query, k=k * 2)
     fused = reciprocal_rank_fusion([dense, keyword])
     return rerank(query, fused)[:k]
+
+
+async def retrieve_async(query: str, store, k: int = 4) -> list[Passage]:
+    """The same retrieval, with the two searches running concurrently.
+
+    Dense and keyword search are independent - one hits pgvector, the other a
+    text index - so running them in sequence adds their latencies for no
+    reason. Concurrently, the cost is the slower of the two rather than the
+    sum, which on a p95 dominated by the vector search is most of the saving.
+
+    This matters more here than in a batch pipeline: a customer is watching a
+    chat window, and every millisecond is one they spend looking at a typing
+    indicator.
+
+    Accepts either a sync or async store so the same code path works against
+    a real client and against the test double - the alternative is two
+    retrieval implementations that drift.
+    """
+    dense, keyword = await asyncio.gather(
+        _maybe_await(store.dense_search, query, k=k * 2),
+        _maybe_await(store.keyword_search, query, k=k * 2),
+    )
+    fused = reciprocal_rank_fusion([dense, keyword])
+    return rerank(query, fused)[:k]
+
+
+async def _maybe_await(fn, *args, **kwargs):
+    """Await an async callable; run a sync one in a worker thread.
+
+    The thread dispatch is the point. Calling a blocking client inline inside
+    a coroutine holds the event loop for the whole call, so the two searches
+    that asyncio.gather is supposed to overlap run one after the other. Tests
+    still pass - the results are identical - and the concurrency simply does
+    not happen. An earlier version of this function did exactly that while a
+    comment claimed otherwise.
+    """
+    if inspect.iscoroutinefunction(fn):
+        return await fn(*args, **kwargs)
+    return await asyncio.to_thread(fn, *args, **kwargs)
 
 
 def reciprocal_rank_fusion(rankings: list[list[Passage]], k: int = 60) -> list[Passage]:
@@ -129,6 +170,44 @@ def _content_tokens(text: str) -> set[str]:
     return {t for t in _tokens(text) if t not in _STOPWORDS}
 
 
+async def answer_async(query: str, store, generate) -> Answer:
+    """Async twin of answer(). The gates are identical - only retrieval and
+    generation are awaited - so there is one set of rules, not two."""
+    passages = await retrieve_async(query, store)
+    verdict = _gate(passages)
+    if verdict is not None:
+        return verdict
+
+    text = generate(query, passages)
+    if inspect.isawaitable(text):
+        text = await text
+
+    if _reads_as_refusal(text):
+        return Answer(text, grounded=False, passages=passages,
+                      reason="model declined despite adequate context")
+    return Answer(text, grounded=True, passages=passages)
+
+
+def _gate(passages: list[Passage]) -> Answer | None:
+    """The refusal rules, in one place.
+
+    Extracted so the sync and async paths cannot drift apart. Two copies of a
+    safety check is one copy that eventually stops matching the other, and the
+    one that stops matching is the one nobody is testing.
+    """
+    if not passages:
+        return Answer(REFUSAL, grounded=False, passages=[],
+                      reason="nothing retrieved")
+    if len(passages) < MIN_PASSAGES:
+        return Answer(REFUSAL, grounded=False, passages=passages,
+                      reason=f"only {len(passages)} passage(s) retrieved")
+    best = max(p.score for p in passages)
+    if best < MIN_RELEVANCE:
+        return Answer(REFUSAL, grounded=False, passages=passages,
+                      reason=f"best relevance {best:.2f} < {MIN_RELEVANCE}")
+    return None
+
+
 def answer(query: str, store, generate) -> Answer:
     """Retrieve, decide whether we may answer at all, then generate.
 
@@ -137,25 +216,9 @@ def answer(query: str, store, generate) -> Answer:
     exists in the process where somebody can later be tempted to return it.
     """
     passages = retrieve(query, store)
-
-    if not passages:
-        # Guarded separately from the count check below. With MIN_PASSAGES at
-        # its usual value this branch is unreachable, but the max() further
-        # down raises ValueError on an empty sequence - so lowering that
-        # constant would turn a refusal into an unhandled exception, which in
-        # a Lambda is a 500 to a customer mid-conversation. Found by
-        # tests/test_threshold.py while checking the gates independently.
-        return Answer(REFUSAL, grounded=False, passages=[],
-                      reason="nothing retrieved")
-
-    if len(passages) < MIN_PASSAGES:
-        return Answer(REFUSAL, grounded=False, passages=passages,
-                      reason=f"only {len(passages)} passage(s) retrieved")
-
-    best = max(p.score for p in passages)
-    if best < MIN_RELEVANCE:
-        return Answer(REFUSAL, grounded=False, passages=passages,
-                      reason=f"best relevance {best:.2f} < {MIN_RELEVANCE}")
+    verdict = _gate(passages)
+    if verdict is not None:
+        return verdict
 
     text = generate(query, passages)
 

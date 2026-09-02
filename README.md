@@ -1,7 +1,7 @@
 # Amazon Connect → Lex → grounded RAG
 
 [![CI](https://github.com/sadvi11/amazon-connect-rag-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/sadvi11/amazon-connect-rag-agent/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-59%20passing-2ea44f)](#how-this-is-tested)
+[![Tests](https://img.shields.io/badge/tests-91%20passing-2ea44f)](#how-this-is-tested)
 [![Cost](https://img.shields.io/badge/AWS%20spend-%240.00-2ea44f)](#cost)
 
 A contact centre chat bot that answers from a knowledge base, **refuses rather
@@ -78,6 +78,39 @@ it as a success.
 Generation does not run when we are going to refuse. Checking afterwards means
 paying for a call we discard, and leaves an unusable answer sitting in the
 process where somebody may later be tempted to return it.
+
+---
+
+## The pipeline, module by module
+
+| | What it does | Why it is not the obvious thing |
+|---|---|---|
+| [`chunking.py`](src/chunking.py) | Splits on structure, overlaps by whole sentences, carries the heading into the chunk | Retrieval cannot return a passage chunking never produced. Splitting every 500 characters cuts mid-sentence, so the embedding is a blend of two half-thoughts and matches neither |
+| [`rag.py`](src/rag.py) | Hybrid search → rank fusion → rerank → two abstention gates | `retrieve_async` runs the two searches concurrently, so the cost is the slower of them rather than the sum |
+| [`prompts.py`](src/prompts.py) | Packs context to a token budget, strongest passage first and second-strongest last | More context is not better context. Past a point the relevant passage is diluted by three that merely share vocabulary |
+| [`schemas.py`](src/schemas.py) | Pydantic request/response contracts | A validator refuses to construct an ungrounded answer that does not escalate — the failure mode where a customer is told "I don't know" and left in a loop |
+| [`service.py`](src/service.py) | FastAPI, `/ask` `/health` `/metrics` | Every response carries its own latency, cost and token usage, with a request id echoed back for correlation |
+| [`fulfillment.py`](src/fulfillment.py) | The Lambda Lex calls | |
+| [`handoff.py`](src/handoff.py) | Builds the agent briefing | |
+| [`metrics.py`](src/metrics.py) | Containment, p95, cost per contact | |
+
+```bash
+uvicorn src.service:app --reload
+```
+
+### Two decisions worth arguing about
+
+**Context ordering.** Models attend most reliably to the beginning and end of
+their input, so `pack_context` puts the strongest passage first and the
+**second**-strongest last, weaker ones in the middle. Sorting by score
+descending — the obvious thing — buries the second-best passage in the weakest
+position in the window. It costs nothing to fix.
+
+**The token estimate is deliberately not a tokeniser.** It only has to decide
+whether one more passage fits, and being wrong in the safe direction costs a
+passage rather than a failed request. A real tokeniser is a model-specific
+dependency for a budgeting decision that tolerates 15% error. Actual usage is
+reported by the model, not estimated.
 
 ---
 
@@ -172,8 +205,13 @@ a good number would be measuring the demo, not the design.
 
 ## How this is tested
 
-**59 tests, no AWS account, no model, no network.** The store and generator are
+**91 tests, no AWS account, no model, no network.** The store and generator are
 substituted; everything between them is the code that runs in Lambda.
+
+The concurrency test measures **wall-clock time**, because a `gather()` over
+two blocking calls made inline is indistinguishable from running them in
+sequence except in how long it takes. Identical results, no concurrency, green
+tests.
 
 The Connect flow and Lex bot are JSON, so they are checked as data rather than
 by clicking through a console:
@@ -197,11 +235,26 @@ ok    caught: a confidently wrong bot reports perfect containment
 ok    caught: the flow compares an attribute nothing ever sets
 ok    caught: a Lex failure loops the customer instead of finding a human
 
-All 9 defects are caught. The checks are load-bearing.
+All 15 defects are caught. The checks are load-bearing.
 ```
 
 Every one of those failures is **silent**. None raises an exception, and a
 green pipeline would report success for all of them.
+
+### Weak tests that fault injection exposed
+
+Three of mine, all of which looked like coverage:
+
+- **A test that passed either way.** `test_the_heading_travels_with_the_chunk`
+  asserted `embedding_text.startswith("Refunds")` against a chunk whose body
+  already began with "Refunds" — true whether or not the heading was prepended
+  at all. The fixture now starts the body with a different word.
+- **A validator nothing exercised.** `/ask` derives `escalate` from `grounded`,
+  so it can never produce the invalid combination the Pydantic validator
+  guards. It was untested while appearing covered. Now tested directly.
+- **A safety check tested on one branch of two.** Refactoring created a second
+  copy of the model-refusal check in `answer_async`; only the sync path had a
+  test. The injected fault landed in the async copy and nothing went red.
 
 ### Bugs this found while being built
 
@@ -211,6 +264,15 @@ green pipeline would report success for all of them.
 - **`escalate` was never set on the success path.** Session attributes persist
   across turns, so a stale `escalate=true` would have routed a perfectly good
   answer to an agent.
+- **A comment describing code I had not written.** `_maybe_await` said a
+  synchronous store "goes to a thread"; it called it inline, which holds the
+  event loop and silently serialises the two searches `gather()` is meant to
+  overlap. Tests passed — the results are identical — and the concurrency
+  simply did not happen.
+- **Chunking merged across section boundaries.** A "Returns" section under the
+  minimum chunk size was absorbed into the previous "Refunds" chunk and
+  inherited its heading, so it embedded under the wrong topic and was
+  unreachable by anyone asking about returns.
 - **`MIN_RELEVANCE` was decorative.** An early version of the eval set proved
   the passage-count gate caught everything and the threshold refused nothing —
   while still being cited as a control. The test now checks each gate

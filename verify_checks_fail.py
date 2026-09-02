@@ -53,6 +53,41 @@ FAULTS = [
      "    recent = transcript",
      "an oversized transcript is sent to Connect and rejected whole"),
 
+    ("src/chunking.py",
+     "            can_merge = len(chunks) > section_start",
+     "            can_merge = len(chunks) > 0",
+     "a short section is absorbed into the previous one under its heading"),
+
+    ("src/chunking.py",
+     'return f"{self.heading}\\n\\n{self.text}".strip() if self.heading else self.text',
+     "return self.text",
+     "the heading is dropped, so chunks embed without their topic"),
+
+    ("src/prompts.py",
+     "        if used_tokens + cost > budget:",
+     "        if used_tokens + cost > 10 ** 9:",
+     "context packing ignores the token budget"),
+
+    ("src/prompts.py",
+     "    return [first, *rest, second]",
+     "    return ranked",
+     "the second-best passage is buried in the middle of the context"),
+
+    ("src/schemas.py",
+     '        if grounded is False and v is False:',
+     '        if False:',
+     "an ungrounded answer can be returned without escalating"),
+
+    ("src/rag.py",
+     "    if inspect.iscoroutinefunction(fn):\n"
+     "        return await fn(*args, **kwargs)\n"
+     "    return await asyncio.to_thread(fn, *args, **kwargs)",
+     "    result = fn(*args, **kwargs)\n"
+     "    if inspect.isawaitable(result):\n"
+     "        return await result\n"
+     "    return result",
+     "a blocking store holds the event loop so the searches stop overlapping"),
+
     ("connect/contact-flow.json",
      '"ComparisonValue": "$.Attributes.escalate"',
      '"ComparisonValue": "$.Attributes.escalated"',
