@@ -113,8 +113,18 @@ def reciprocal_rank_fusion(rankings: list[list[Passage]], k: int = 60) -> list[P
     Dense similarity and keyword relevance are not on the same scale and there
     is no honest way to add them. RRF sidesteps that entirely: it only uses
     where a passage placed in each list, so no normalisation fudge is needed.
-    k=60 is the value from the original paper; it damps the influence of any
-    single list's top result.
+
+        RRFscore(d) = sum over rankings r of  1 / (k + r(d))
+
+    k=60 is the value from Cormack, Clarke and Buettcher (SIGIR 2009), where
+    it "was fixed during a pilot investigation and not altered during
+    subsequent validation". Worth being precise about: 60 is empirical, not
+    derived, and the paper offers no theory for it. Larger k flattens the gap
+    between consecutive ranks, so a passage ranked first contributes less
+    disproportionately - but that is a property of the formula, not the
+    authors' stated reason for the number.
+
+    https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf
     """
     scores: dict[str, float] = {}
     seen: dict[str, Passage] = {}
