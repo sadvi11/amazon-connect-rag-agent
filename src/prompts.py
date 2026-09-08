@@ -68,7 +68,8 @@ def render_examples() -> str:
     for question, context, answer in FEW_SHOT:
         blocks.append(
             f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer: {answer}")
-    return "Examples of the expected answer format:\n\n" + "\n\n---\n\n".join(blocks) + "\n\n---\n\n"
+    header = "Examples of the expected answer format:\n\n"
+    return header + "\n\n---\n\n".join(blocks) + "\n\n---\n\n"
 
 
 # Toggle so the two prompt versions can be compared rather than argued about.
