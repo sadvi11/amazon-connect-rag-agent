@@ -51,3 +51,48 @@ def test_the_estimate_is_within_a_usable_margin():
     """It only has to be good enough to decide whether one more passage fits."""
     text = "This is a sentence of ordinary English prose. " * 20
     assert 0.6 <= estimate_tokens(text) / (len(text.split()) * 1.3) <= 1.6
+
+
+# ── The few-shot scaffold ────────────────────────────────────────────────────
+
+def test_the_examples_appear_before_the_real_context():
+    """Order matters: examples establish the pattern, then the live question."""
+    from src import prompts
+    prompts.USE_FEW_SHOT = True
+    prompt, _ = build_prompt("How long do refunds take?", _passages(2, size=5))
+    assert prompt.index("Examples of the expected answer format") < prompt.index("Context:\n")
+
+
+def test_one_example_demonstrates_a_refusal():
+    """The point of the scaffold. An instruction to refuse is a sentence the
+    model weighs against being helpful; a demonstrated refusal is a pattern it
+    copies."""
+    from src import prompts
+    assert any(answer.strip() == "I don't know." for _, _, answer in prompts.FEW_SHOT)
+
+
+def test_every_example_answer_cites_or_refuses():
+    """A worked example that states a fact without a citation teaches the model
+    to do the same."""
+    from src import prompts
+    for _, _, answer in prompts.FEW_SHOT:
+        assert "[" in answer or answer.strip() == "I don't know."
+
+
+def test_the_scaffold_can_be_turned_off():
+    """So the two versions can be compared rather than argued about."""
+    from src import prompts
+    prompts.USE_FEW_SHOT = False
+    off, _ = build_prompt("q", _passages(2, size=5))
+    prompts.USE_FEW_SHOT = True
+    on, _ = build_prompt("q", _passages(2, size=5))
+    assert len(on) > len(off)
+    assert "Examples of the expected" not in off
+
+
+def test_the_examples_are_counted_against_the_budget():
+    """They are tokens on every turn. If they were free the budget would be
+    lying."""
+    from src import prompts
+    prompts.USE_FEW_SHOT = True
+    assert prompts.estimate_tokens(prompts.render_examples()) > 50

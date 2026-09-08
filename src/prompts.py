@@ -30,6 +30,49 @@ If the context does not contain the answer, say exactly: I don't know.
 Do not use outside knowledge. Do not guess. Do not apologise at length.
 Cite the source name in brackets after any fact you state."""
 
+# Two worked examples, shown to the model before the real question.
+#
+# These are not chain-of-thought. This is a support bot: the reasoning is one
+# hop, and asking it to think step by step would spend tokens narrating a
+# lookup. What the examples teach is *format and refusal behaviour* - cite the
+# source, and decline when the context does not cover it.
+#
+# The second example is the one that matters. An instruction to refuse is a
+# sentence the model can weigh against being helpful; a demonstrated refusal is
+# a pattern it can copy. Instruction-only prompting reliably under-refuses,
+# because helpfulness is what the model was trained toward.
+FEW_SHOT = [
+    (
+        "How long do refunds take?",
+        "[refunds]\nRefunds are processed within 30 days of receiving the returned item.",
+        "Refunds are processed within 30 days of receiving the returned item [refunds].",
+    ),
+    (
+        "Can I pay in Japanese yen?",
+        "[refunds]\nRefunds are issued to the original payment method.\n\n"
+        "[shipping]\nOrders ship within 2 business days.",
+        "I don't know.",
+    ),
+]
+
+
+def render_examples() -> str:
+    """The few-shot block, or empty when disabled.
+
+    Kept separate from build_prompt so the cost of the examples can be measured
+    on its own - see scripts/measure_few_shot.py.
+    """
+    if not USE_FEW_SHOT:
+        return ""
+    blocks = []
+    for question, context, answer in FEW_SHOT:
+        blocks.append(f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer: {answer}")
+    return "Examples of the expected answer format:\n\n" + "\n\n---\n\n".join(blocks) + "\n\n---\n\n"
+
+
+# Toggle so the two prompt versions can be compared rather than argued about.
+USE_FEW_SHOT = True
+
 
 @dataclass
 class PackedContext:
@@ -89,6 +132,7 @@ def build_prompt(question: str, passages: list,
     packed = pack_context(passages, budget)
     prompt = (
         f"{SYSTEM}\n\n"
+        f"{render_examples()}"
         f"Context:\n{packed.text}\n\n"
         f"Question: {question}\n\n"
         f"Answer:"
