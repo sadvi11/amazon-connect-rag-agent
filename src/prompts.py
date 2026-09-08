@@ -66,7 +66,8 @@ def render_examples() -> str:
         return ""
     blocks = []
     for question, context, answer in FEW_SHOT:
-        blocks.append(f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer: {answer}")
+        blocks.append(
+            f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer: {answer}")
     return "Examples of the expected answer format:\n\n" + "\n\n---\n\n".join(blocks) + "\n\n---\n\n"
 
 

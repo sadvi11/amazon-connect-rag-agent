@@ -11,7 +11,9 @@ below is not mistaken for a quality result.
 
     python3 scripts/measure_few_shot.py
 """
-import sys, pathlib
+import pathlib
+import sys
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from src import prompts
@@ -19,8 +21,10 @@ from src.rag import Passage
 
 CORPUS = [
     Passage("Refunds are processed within 30 days of receiving the returned item.", 1.0, "refunds"),
-    Passage("Refunds are issued to the original payment method once we receive the return.", .9, "refunds"),
-    Passage("To return an item, use the returns portal and print the prepaid label.", .8, "returns"),
+    Passage("Refunds are issued to the original payment method once we receive\n"
+            "        the return.", .9, "refunds"),
+    Passage("To return an item, use the returns portal and print the prepaid\n"
+            "        label.", .8, "returns"),
     Passage("Orders ship within 2 business days from our Calgary warehouse.", .7, "shipping"),
     Passage("Policy code RTN-14 covers damaged goods on arrival.", .6, "policy"),
 ]
@@ -54,7 +58,7 @@ def main() -> int:
     pct = overhead / off["prompt_tokens"] * 100
     print(f"\n  The examples cost {overhead} tokens - {pct:.0f}% on top of the "
           f"zero-shot prompt,")
-    print(f"  paid on every single turn.")
+    print("  paid on every single turn.")
 
     # The budget is fixed, so the examples compete with retrieved passages only
     # once the context is full. On a small corpus they are free in that sense.
@@ -62,8 +66,8 @@ def main() -> int:
         print(f"  They also cost {off['passages_kept'] - on['passages_kept']} "
               f"retrieved passage(s) at the current budget.")
     else:
-        print(f"  At this corpus size they cost no retrieved passages - the "
-              f"context budget\n  is not the binding constraint yet.")
+        print("  At this corpus size they cost no retrieved passages - the "
+              "context budget\n  is not the binding constraint yet.")
 
     print("\n  Not measured: whether answers improve. That needs real "
           "generations against\n  the eval set, and it costs money.")
